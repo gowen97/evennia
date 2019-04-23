@@ -26,9 +26,7 @@ ERROR_NO_SUPERUSER = """
 
 
 LIMBO_DESC = _("""
-Welcome to your new |wEvennia|n-based game! Visit http://www.evennia.com if you need
-help, want to contribute, report issues or just join the community.
-As Account #1 you can create a demo/tutorial area with |w@batchcommand tutorial_world.build|n.
+You are about to enter the house of flesh. You can enter the debug room through the large red door. Just type, large red door.
     """)
 
 

@@ -4,6 +4,7 @@ Commands that are available from the connect screen.
 import re
 import time
 import datetime
+import random
 from random import getrandbits
 from django.conf import settings
 from django.contrib.auth import authenticate
@@ -16,12 +17,13 @@ from evennia.server.sessionhandler import SESSIONS
 
 from evennia.utils import create, logger, utils, gametime
 from evennia.commands.cmdhandler import CMD_LOGINSTART
+#from evennia.commands.command import Command
 
 COMMAND_DEFAULT_CLASS = utils.class_from_module(settings.COMMAND_DEFAULT_CLASS)
 
 # limit symbol import for API
 __all__ = ("CmdUnconnectedConnect", "CmdUnconnectedCreate",
-           "CmdUnconnectedQuit", "CmdUnconnectedLook", "CmdUnconnectedHelp")
+           "CmdUnconnectedQuit", "CmdUnconnectedLook", "CmdUnconnectedHelp", "CmdUnconnectedDefaultUser")
 
 MULTISESSION_MODE = settings.MULTISESSION_MODE
 CONNECTION_SCREEN_MODULE = settings.CONNECTION_SCREEN_MODULE
@@ -31,6 +33,63 @@ CONNECTION_THROTTLE = Throttle(limit=5, timeout=1 * 60)
 CREATION_THROTTLE = Throttle(limit=2, timeout=10 * 60)
 LOGIN_THROTTLE = Throttle(limit=5, timeout=5 * 60)
 
+# list of already-created accounts
+accountList = []
+
+def create_default_account(session):
+    """
+    Creates a default ccount
+    Args:
+        session (Session): the session which will use the guest account/character.
+    Returns:
+        GUEST_ENABLED (boolean), account (Account):
+            the boolean is whether guest accounts are enabled at all.
+            the Account which was created from an available guest name.
+    """
+    # Check IP bans.
+    bans = ServerConfig.objects.conf("server_bans")
+    if bans and any(tup[2].match(session.address) for tup in bans if tup[2]):
+        # this is a banned IP!
+        string = "|rYou have been banned and cannot continue from here." \
+                 "\nIf you feel this ban is in error, please email an admin.|x"
+        session.msg(string)
+        session.sessionhandler.disconnect(session, "Good bye! Disconnecting.")
+        return True, None
+
+    try:
+        # Find an available guest name.
+        first = ["salt", "sun", "moon", "rose", "orange", "dew", "blood", "dirt", "silver"]
+        second = ["light", "wave", "bloom", "taste", "ray", "drop", "beam", "touch", "core"]
+        #print("HERE!!!!")
+        accountname = ("%s-%s") % (random.choice(first), random.choice(second))
+        # check if accountname is already in the list
+        for name in accountList:
+            if name==accountname:
+                # try again
+                accountname = ("%s-%s") % (random.choice(first), random.choice(second))
+        # does this work like at all?
+        # build a new account with the found guest accountname
+        password = "%016x" % getrandbits(64)
+        #session.msg("Password: %s" % password)
+        self.db.password = password #don't show the user
+        home = ObjectDB.objects.get_id(settings.GUEST_HOME) #default
+        # maybe try to set the home to the room that has just been created?
+        # can i do a try catch here? just to make sure nothing breaks
+        permissions = settings.PERMISSION_ACCOUNT_DEFAULT
+        typeclass = settings.BASE_CHARACTER_TYPECLASS
+        new_account = _create_account(session, accountname, password, permissions)
+        accountList.append(accountname)
+        if new_account:
+            _create_character(session, new_account, typeclass, home, permissions)
+        return new_account
+
+    except Exception:
+        # We are in the middle between logged in and -not, so we have
+        # to handle tracebacks ourselves at this point. If we don't,
+        # we won't see any errors at all.
+        session.msg("An error occurred. Please e-mail an admin if the problem persists.")
+        logger.log_trace()
+        raise
 
 def create_guest_account(session):
     """
@@ -150,8 +209,8 @@ class CmdUnconnectedConnect(COMMAND_DEFAULT_CLASS):
 
     If you have spaces in your name, enclose it in double quotes.
     """
-    key = "connect"
-    aliases = ["conn", "con", "co"]
+    key = "oldconnect"
+    aliases = ["oldconn", "oldcon", "oldco"]
     locks = "cmd:all()"  # not really needed
     arg_regex = r"\s.*?|$"
 
@@ -198,6 +257,38 @@ class CmdUnconnectedConnect(COMMAND_DEFAULT_CLASS):
         if account:
             session.sessionhandler.login(session, account)
 
+
+class CmdUnconnectedDefaultUser(COMMAND_DEFAULT_CLASS):
+    """
+    default user
+    """
+    key = "connect"
+    aliases = ["conn", "con", "co"]
+    locks = "cmd:all()"  # not really needed
+    arg_regex = r"\s.*?|$"
+
+    def func(self):
+        """
+        Uses the Django admin api. Note that unlogged-in commands
+        have a unique position in that their func() receives
+        a session object instead of a source_object like all
+        other types of logged-in commands (this is because
+        there is no object yet before the account has logged in)
+        """
+        session = self.caller
+
+        # check for too many login errors too quick.
+        address = session.address
+        if isinstance(address, tuple):
+            address = address[0]
+        if CONNECTION_THROTTLE.check(address):
+            # timeout is 5 minutes.
+            session.msg("|RYou made too many connection attempts. Try again in a few minutes.|n")
+            return
+
+        new_account = create_default_account(session)
+        if new_account:
+            session.sessionhandler.login(session, new_account)
 
 class CmdUnconnectedCreate(COMMAND_DEFAULT_CLASS):
     """
@@ -382,6 +473,7 @@ You are not yet logged into the game. Commands available at this point:
 
   |wcreate|n - create a new account
   |wconnect|n - connect with an existing account
+  |wconnect|n - connect to the game
   |wlook|n - re-show the connection screen
   |whelp|n - show this help
   |wencoding|n - change the text encoding to match your client

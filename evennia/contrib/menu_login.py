@@ -32,6 +32,8 @@ should do.
 
 """
 
+
+
 import re
 from textwrap import dedent
 
@@ -330,6 +332,7 @@ class UnloggedinCmdSet(CmdSet):
     def at_cmdset_creation(self):
         "Called when cmdset is first created."
         self.add(CmdUnloggedinLook())
+
 
 
 class CmdUnloggedinLook(Command):
